@@ -24,7 +24,7 @@ API_ID = 38564455
 API_HASH = "e3c8798942e870d34d34fd35b53ef8be"
 
 # Bot Credentials
-BOT_TOKEN = "8747426655:AAEOo6nElQSp77ji0CZtI9UFlRlaErRnh5s"
+BOT_TOKEN = "8747426655:AAG94P6HWK81vEGWyL4hyT7892J230a9z1I"
 ADMIN_ID = 7488697341  # শুধুমাত্র আপনার আইডি এডমিন হিসেবে কাজ করবে
 
 # Channels for Force Join (বটকে অবশ্যই এই ২টি চ্যানেলে এডমিন বানাতে হবে)
