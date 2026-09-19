@@ -1,7 +1,23 @@
+import os
+import threading
 import requests
 import json
+from flask import Flask
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+# ==================== FLASK SERVER FOR RENDER ====================
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+@flask_app.route('/ping')
+def ping():
+    return "Bot is alive!", 200
+
+def run_flask():
+    # Render স্বয়ংক্রিয়ভাবে PORT এনভায়রনমেন্ট ভ্যারিয়েবল প্রোভাইড করে
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port)
 
 # ==================== CONFIGURATION ====================
 API_ID = 38564455
@@ -11,7 +27,7 @@ API_HASH = "e3c8798942e870d34d34fd35b53ef8be"
 BOT_TOKEN = "8747426655:AAEOo6nElQSp77ji0CZtI9UFlRlaErRnh5s"
 ADMIN_ID = 7488697341  # শুধুমাত্র আপনার আইডি এডমিন হিসেবে কাজ করবে
 
-# Channels for Force Join (বটকে অবশ্যই এই ২টা চ্যানেলে এডমিন বানাতে হবে)
+# Channels for Force Join (বটকে অবশ্যই এই ২টি চ্যানেলে এডমিন বানাতে হবে)
 CHANNEL_1 = "hsmoviehub"   # Username without @
 CHANNEL_2 = "Hs_Shadowx"   # Username without @
 
@@ -109,7 +125,7 @@ async def send_welcome_menu(message_or_callback):
         buttons.append([InlineKeyboardButton(data['title'], callback_data=f"getfile_{key}")])
     
     reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
-    text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয়  ভিডিওটি সংগ্রহ করুন:"
+    text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয় ভিডিওটি সংগ্রহ করুন:"
     
     if hasattr(message_or_callback, "reply_text"):
         await message_or_callback.reply_text(text, reply_markup=reply_markup)
@@ -303,5 +319,8 @@ async def admin_message_handler(client, message):
 
 
 if __name__ == "__main__":
+    # Start Flask Web Server in Background Thread
+    threading.Thread(target=run_flask, daemon=True).start()
+    
     print("Bot is starting...")
     app.run()
