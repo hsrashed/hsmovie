@@ -15,7 +15,6 @@ def ping():
     return "Bot is alive!", 200
 
 def run_flask():
-    # Render স্বয়ংক্রিয়ভাবে PORT এনভায়রনমেন্ট ভ্যারিয়েবল প্রোভাইড করে
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host="0.0.0.0", port=port)
 
@@ -27,23 +26,26 @@ API_HASH = "e3c8798942e870d34d34fd35b53ef8be"
 BOT_TOKEN = "8747426655:AAG94P6HWK81vEGWyL4hyT7892J230a9z1I"
 ADMIN_ID = 7488697341  # শুধুমাত্র আপনার আইডি এডমিন হিসেবে কাজ করবে
 
-# Channels for Force Join (বটকে অবশ্যই এই ২টি চ্যানেলে এডমিন বানাতে হবে)
-CHANNEL_1 = "hsmoviehub"   # Username without @
-CHANNEL_2 = "Hs_Shadowx"   # Username without @
+# Public Channels (Username without @)
+CHANNEL_1 = "hsmoviehub"   
+CHANNEL_2 = "Hs_Shadowx"   
+
+# Private Channel Configuration
+CHANNEL_3_ID = -1004496492913  # প্রাইভেট চ্যানেলের আইডি
+CHANNEL_3_LINK = "https://t.me/+wHqXvE1ZHzdjYTg1"  # প্রাইভেট চ্যানেলের Invite Link
 
 # Firebase Realtime Database URL
 DATABASE_URL = "https://hs-movies-app-default-rtdb.firebaseio.com"
 # =======================================================
 
-# Initialize Pyrogram Bot Client
+# Initialize Pyrogram Bot Client (Session name v2 updated)
 app = Client(
-    "hs_movie_bot",
+    "hs_movie_bot_v2",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-# In-Memory Storage for Admin Session & Dynamic Commands Data
 admin_state = {}
 commands_data = {}  # Format: {"cmd_1": {"title": "Movie 1", "file_id": "...", "type": "video"}}
 
@@ -62,32 +64,28 @@ def save_user_to_firebase(user_id, first_name, username):
         print(f"Firebase Save Error: {e}")
 
 
-# Helper Function: Check Channel Membership via Telegram HTTP API
-def is_user_member_of_channel(channel_username, user_id):
+# Helper Function: Check Membership using Pyrogram Client
+async def is_user_member(client, chat_id, user_id):
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
-        params = {"chat_id": f"@{channel_username}", "user_id": user_id}
-        res = requests.get(url, params=params, timeout=5).json()
-        if res.get("ok"):
-            status = res["result"]["status"]
-            if status in ["creator", "administrator", "member"]:
-                return True
+        member = await client.get_chat_member(chat_id, user_id)
+        if member.status in ["creator", "administrator", "member"]:
+            return True
         return False
     except Exception as e:
-        print(f"API Check Error for {channel_username}: {e}")
+        print(f"Check Member Error for {chat_id}: {e}")
         return False
 
 
-# Main Check Joined Function
-async def check_joined(user_id):
-    # এডমিন হলে Force Join স্কিপ হবে
+# Main Check Joined Function (Checking all 3 channels)
+async def check_joined(client, user_id):
     if user_id == ADMIN_ID:
         return True
     
-    check_ch1 = is_user_member_of_channel(CHANNEL_1, user_id)
-    check_ch2 = is_user_member_of_channel(CHANNEL_2, user_id)
+    check_ch1 = await is_user_member(client, f"@{CHANNEL_1}", user_id)
+    check_ch2 = await is_user_member(client, f"@{CHANNEL_2}", user_id)
+    check_ch3 = await is_user_member(client, CHANNEL_3_ID, user_id)
     
-    return check_ch1 and check_ch2
+    return check_ch1 and check_ch2 and check_ch3
 
 
 # User: /start Command
@@ -98,19 +96,21 @@ async def start_handler(client, message):
     
     save_user_to_firebase(user_id, first_name, message.from_user.username)
     
-    is_joined = await check_joined(user_id)
+    is_joined = await check_joined(client, user_id)
     
     if not is_joined:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Join Channel 1", url=f"https://t.me/{CHANNEL_1}"),
              InlineKeyboardButton("📢 Join Channel 2", url=f"https://t.me/{CHANNEL_2}")],
+            [InlineKeyboardButton("🔒 Join Private Channel 3", url=CHANNEL_3_LINK)],
             [InlineKeyboardButton("✅ Check / Joined", callback_data="check_join")]
         ])
         text = (
             f"👋 <b>হ্যালো {first_name}!</b>\n\n"
-            f"বটটি ব্যবহার করতে এবং আপনার কাঙ্ক্ষিত ভিডিও গ্রহণ করতে আপনাকে অবশ্যই আমাদের নিচের ২টি চ্যানেলে জয়েন করতে হবে:\n\n"
+            f"বটটি ব্যবহার করতে এবং আপনার কাঙ্ক্ষিত ভিডিও গ্রহণ করতে আপনাকে অবশ্যই আমাদের নিচের ৩টি চ্যানেলে জয়েন করতে হবে:\n\n"
             f"১. <b>Hs Movie Hub</b>\n"
-            f"২. <b>Hs Shadowx</b>\n\n"
+            f"২. <b>Hs Shadowx</b>\n"
+            f"৩. <b>Private Channel</b>\n\n"
             f"👇 জয়েন করার পর নিচের <b>'Check / Joined'</b> বাটনে ক্লিক করুন।"
         )
         await message.reply_text(text, reply_markup=keyboard)
@@ -141,18 +141,18 @@ async def callback_handler(client, callback_query):
     
     # Check Force Join Callback
     if data == "check_join":
-        is_joined = await check_joined(user_id)
+        is_joined = await check_joined(client, user_id)
         if is_joined:
             await callback_query.answer("ধন্যবাদ! আপনি সফলভাবে চ্যানেলগুলোতে জয়েন করেছেন।", show_alert=True)
             await send_welcome_menu(callback_query)
         else:
-            await callback_query.answer("⚠️ আপনি এখনও ২টি চ্যানেলে জয়েন করেননি! অনুগ্রহ করে আগে জয়েন করুন।", show_alert=True)
+            await callback_query.answer("⚠️ আপনি এখনও ৩টি চ্যানেলে জয়েন করেননি! অনুগ্রহ করে আগে জয়েন করুন।", show_alert=True)
             
     # Send Selected File to User
     elif data.startswith("getfile_"):
-        is_joined = await check_joined(user_id)
+        is_joined = await check_joined(client, user_id)
         if not is_joined:
-            await callback_query.answer("⚠️ ফাইলটি পেতে আপনাকে অবশ্যই চ্যানেলগুলোতে জয়েন করতে হবে!", show_alert=True)
+            await callback_query.answer("⚠️ ফাইলটি পেতে আপনাকে অবশ্যই সবগুলোতে জয়েন করতে হবে!", show_alert=True)
             return
 
         cmd_key = data.split("getfile_")[1]
@@ -254,12 +254,11 @@ async def admin_panel(client, message):
     await message.reply_text("স্বাগতম এডমিন প্যানেলে! আপনার করণীয় অপশন বেছে নিন:", reply_markup=keyboard)
 
 
-# Admin Message Handler (Add / Edit input handling)
+# Admin Message Handler
 @app.on_message(filters.user(ADMIN_ID) & filters.private & ~filters.command(["start", "admin"]))
 async def admin_message_handler(client, message):
     state = admin_state.get(ADMIN_ID, {}).get("step")
     
-    # Step 1: Receiving File/Media from Admin
     if state == "WAITING_FOR_MEDIA":
         file_id = None
         file_type = None
@@ -287,7 +286,6 @@ async def admin_message_handler(client, message):
         else:
             await message.reply_text("দয়া করে একটি সঠিক ভিডিও, ছবি বা ফাইল পাঠান।")
             
-    # Step 2: Receiving Button Title & Saving Command
     elif state == "WAITING_FOR_TITLE":
         cmd_title = message.text.strip()
         temp_data = admin_state.get(ADMIN_ID, {})
@@ -303,9 +301,8 @@ async def admin_message_handler(client, message):
         }
         
         admin_state[ADMIN_ID] = {}
-        await message.reply_text(f"✅ সাকসেসফুলি অ্যাড হয়েছে!\n\nবাটনের নাম: <b>{cmd_title}</b>\nইউজারদের ওয়েলকাম মেনুতে এই বাটনটি যুক্ত হয়ে গেছে।")
+        await message.reply_text(f"✅ সাকসেসফুলি অ্যাড হয়েছে!\n\nবাটনের নাম: <b>{cmd_title}</b>")
 
-    # Step 3: Editing Title of existing Command
     elif state == "WAITING_FOR_EDIT_TITLE":
         new_title = message.text.strip()
         edit_key = admin_state.get(ADMIN_ID, {}).get("edit_key")
@@ -319,8 +316,6 @@ async def admin_message_handler(client, message):
 
 
 if __name__ == "__main__":
-    # Start Flask Web Server in Background Thread
     threading.Thread(target=run_flask, daemon=True).start()
-    
     print("Bot is starting...")
     app.run()
