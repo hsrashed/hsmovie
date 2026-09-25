@@ -38,22 +38,6 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# In-Memory Database Structure:
-# commands_data = {
-#     "cmd_1": {
-#         "title": "Drama Name",
-#         "is_episodic": True,
-#         "episodes": {
-#             "ep_1": {"title": "Episode 1", "files": [{"id": "...", "type": "video"}]}
-#         }
-#     },
-#     "cmd_2": {
-#         "title": "Movie Name",
-#         "is_episodic": False,
-#         "files": [{"id": "...", "type": "video"}]
-#     }
-# }
-
 admin_state = {}
 commands_data = {}
 
@@ -116,7 +100,7 @@ async def start_handler(client, message):
 async def send_welcome_menu(message_or_callback):
     buttons = []
     for key, data in commands_data.items():
-        buttons.append([InlineKeyboardButton(data['title'], callback_data=f"maincmd_{key}")])
+        buttons.append([InlineKeyboardButton(data['title'], callback_data=f"mc_{key}")])
     
     reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
     text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয় কন্টেন্ট নির্বাচন করুন:"
@@ -130,14 +114,17 @@ async def send_file_list(client, user_id, file_list):
     for item in file_list:
         f_id = item['id']
         f_type = item['type']
-        if f_type == "video":
-            await client.send_video(user_id, f_id)
-        elif f_type == "photo":
-            await client.send_photo(user_id, f_id)
-        elif f_type == "document":
-            await client.send_document(user_id, f_id)
-        elif f_type == "audio":
-            await client.send_audio(user_id, f_id)
+        try:
+            if f_type == "video":
+                await client.send_video(user_id, f_id)
+            elif f_type == "photo":
+                await client.send_photo(user_id, f_id)
+            elif f_type == "document":
+                await client.send_document(user_id, f_id)
+            elif f_type == "audio":
+                await client.send_audio(user_id, f_id)
+        except Exception as e:
+            print(f"Error sending file: {e}")
 
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
@@ -152,21 +139,21 @@ async def callback_handler(client, callback_query):
             await callback_query.answer("⚠️ আপনি এখনও ২টি চ্যানেলে জয়েন করেননি!", show_alert=True)
             return
 
-    # User Selection Handling
-    elif data.startswith("maincmd_"):
+    # User Selection: Main Title Clicked
+    elif data.startswith("mc_"):
         if not await check_joined(user_id):
             await callback_query.answer("⚠️ ফাইল পেতে চ্যানেলে জয়েন করুন!", show_alert=True)
             return
 
-        cmd_key = data.split("maincmd_")[1]
+        cmd_key = data.replace("mc_", "")
         if cmd_key in commands_data:
             item = commands_data[cmd_key]
             if item.get("is_episodic"):
-                # পর্বের লিস্ট দেখানো
                 buttons = []
                 episodes = item.get("episodes", {})
                 for ep_key, ep_val in episodes.items():
-                    buttons.append([InlineKeyboardButton(ep_val['title'], callback_data=f"getep_{cmd_key}_{ep_key}")])
+                    # Format: ge_cmdKey_epKey
+                    buttons.append([InlineKeyboardButton(ep_val['title'], callback_data=f"ge_{cmd_key}_{ep_key}")])
                 
                 buttons.append([InlineKeyboardButton("🔙 Back Main Menu", callback_data="back_user_main")])
                 await callback_query.message.edit_text(
@@ -174,25 +161,27 @@ async def callback_handler(client, callback_query):
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
             else:
-                # সিঙ্গেল মুভি বা কন্টেন্ট (সবকটি ভিডিও পাঠানো)
                 await callback_query.answer("ফাইল পাঠানো হচ্ছে...")
                 await send_file_list(client, user_id, item.get("files", []))
         else:
             await callback_query.answer("কন্টেন্ট খুঁজে পাওয়া যায়নি!", show_alert=True)
 
-    elif data.startswith("getep_"):
+    # User Selection: Episode Clicked
+    elif data.startswith("ge_"):
         if not await check_joined(user_id):
             await callback_query.answer("⚠️ ফাইল পেতে চ্যানেলে জয়েন করুন!", show_alert=True)
             return
 
         parts = data.split("_")
-        cmd_key, ep_key = parts[1], parts[2]
-        if cmd_key in commands_data and ep_key in commands_data[cmd_key].get("episodes", {}):
-            ep_data = commands_data[cmd_key]["episodes"][ep_key]
-            await callback_query.answer("পর্বের ভিডিও পাঠানো হচ্ছে...")
-            await send_file_list(client, user_id, ep_data.get("files", []))
-        else:
-            await callback_query.answer("পর্বটি খুঁজে পাওয়া যায়নি!", show_alert=True)
+        if len(parts) >= 3:
+            cmd_key, ep_key = parts[1], parts[2]
+            if cmd_key in commands_data and ep_key in commands_data[cmd_key].get("episodes", {}):
+                ep_data = commands_data[cmd_key]["episodes"][ep_key]
+                await callback_query.answer("পর্বের ভিডিও পাঠানো হচ্ছে...")
+                await send_file_list(client, user_id, ep_data.get("files", []))
+                return
+        
+        await callback_query.answer("পর্বটি খুঁজে পাওয়া যায়নি!", show_alert=True)
 
     elif data == "back_user_main":
         await send_welcome_menu(callback_query)
@@ -224,13 +213,13 @@ async def callback_handler(client, callback_query):
             await send_admin_home(callback_query)
 
         elif data.startswith("admin_manage_"):
-            cmd_key = data.split("admin_manage_")[1]
+            cmd_key = data.replace("admin_manage_", "")
             if cmd_key in commands_data:
                 item = commands_data[cmd_key]
                 buttons = []
                 if item.get("is_episodic"):
-                    buttons.append([InlineKeyboardButton("➕ Add Episode", callback_data=f"add_ep_{cmd_key}")])
-                    buttons.append([InlineKeyboardButton("📋 Manage Episodes", callback_data=f"mng_ep_{cmd_key}")])
+                    buttons.append([InlineKeyboardButton("➕ Add Episode", callback_data=f"ae_{cmd_key}")])
+                    buttons.append([InlineKeyboardButton("📋 Manage Episodes", callback_data=f"me_{cmd_key}")])
                 
                 buttons.append([InlineKeyboardButton("🗑️ Delete Whole Content", callback_data=f"del_cmd_{cmd_key}")])
                 buttons.append([InlineKeyboardButton("🔙 Back", callback_data="admin_manage_cmds")])
@@ -238,8 +227,8 @@ async def callback_handler(client, callback_query):
                 txt = f"<b>কন্টেন্ট:</b> {item['title']}\n<b>টাইপ:</b> {'Episodic' if item['is_episodic'] else 'Single'}"
                 await callback_query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
 
-        elif data.startswith("add_ep_"):
-            cmd_key = data.split("add_ep_")[1]
+        elif data.startswith("ae_"):
+            cmd_key = data.replace("ae_", "")
             admin_state[ADMIN_ID] = {
                 "step": "WAITING_FOR_EP_TITLE",
                 "cmd_key": cmd_key
@@ -247,26 +236,28 @@ async def callback_handler(client, callback_query):
             await callback_query.message.reply_text("নতুন পর্বের নাম লিখে পাঠান (যেমন: Episode 1):")
             await callback_query.answer()
 
-        elif data.startswith("mng_ep_"):
-            cmd_key = data.split("mng_ep_")[1]
+        elif data.startswith("me_"):
+            cmd_key = data.replace("me_", "")
             if cmd_key in commands_data:
                 episodes = commands_data[cmd_key].get("episodes", {})
                 buttons = []
                 for ep_k, ep_v in episodes.items():
-                    buttons.append([InlineKeyboardButton(f"🗑️ Delete {ep_v['title']}", callback_data=f"delemit_{cmd_key}_{ep_k}")])
+                    buttons.append([InlineKeyboardButton(f"🗑️ Delete {ep_v['title']}", callback_data=f"de_{cmd_key}_{ep_k}")])
                 buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"admin_manage_{cmd_key}")])
                 await callback_query.message.edit_text("পর্ব ম্যানেজমেন্ট:", reply_markup=InlineKeyboardMarkup(buttons))
 
-        elif data.startswith("delemit_"):
+        elif data.startswith("de_"):
             parts = data.split("_")
-            cmd_key, ep_key = parts[1], parts[2]
-            if cmd_key in commands_data and ep_key in commands_data[cmd_key]["episodes"]:
-                del commands_data[cmd_key]["episodes"][ep_key]
-                await callback_query.answer("পর্বটি সফলভাবে মুছে ফেলা হয়েছে!", show_alert=True)
-                await show_admin_manage_menu(callback_query)
+            if len(parts) >= 3:
+                cmd_key, ep_key = parts[1], parts[2]
+                if cmd_key in commands_data and ep_key in commands_data[cmd_key]["episodes"]:
+                    del commands_data[cmd_key]["episodes"][ep_key]
+                    await callback_query.answer("পর্বটি সফলভাবে মুছে ফেলা হয়েছে!", show_alert=True)
+                    await show_admin_manage_menu(callback_query)
+                    return
 
         elif data.startswith("del_cmd_"):
-            cmd_key = data.split("del_cmd_")[1]
+            cmd_key = data.replace("del_cmd_", "")
             if cmd_key in commands_data:
                 del commands_data[cmd_key]
                 await callback_query.answer("কন্টেন্ট সম্পূর্ণ ডিলিট করা হয়েছে!", show_alert=True)
@@ -304,11 +295,11 @@ async def admin_message_handler(client, message):
     state_data = admin_state.get(ADMIN_ID, {})
     step = state_data.get("step")
 
-    # Step 1: Receiving Main Title
+    # Step 1: Main Title Input
     if step == "WAITING_FOR_MAIN_TITLE":
         title = message.text.strip()
         is_episodic = state_data.get("is_episodic")
-        cmd_key = f"cmd_{len(commands_data) + 1}"
+        cmd_key = f"c{len(commands_data) + 1}"
         
         if is_episodic:
             commands_data[cmd_key] = {
@@ -319,7 +310,7 @@ async def admin_message_handler(client, message):
             admin_state[ADMIN_ID] = {}
             
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Add Episode", callback_data=f"add_ep_{cmd_key}")],
+                [InlineKeyboardButton("➕ Add Episode", callback_data=f"ae_{cmd_key}")],
                 [InlineKeyboardButton("📋 Manage Content", callback_data=f"admin_manage_{cmd_key}")]
             ])
             await message.reply_text(f"✅ মেইন টাইটেল <b>'{title}'</b> তৈরি হয়েছে!\nএখন পর্ব যোগ করতে নিচের 'Add Episode' বাটনে চাপুন:", reply_markup=keyboard)
@@ -345,7 +336,7 @@ async def admin_message_handler(client, message):
         }
         await message.reply_text(f"<b>'{ep_title}'</b> পর্বটির জন্য কয়টি ভিডিও/ফাইল শেয়ার করতে চান? (সংখ্যা লিখে পাঠান):")
 
-    # Step 3: Getting Total File Count
+    # Step 3: File Count Input
     elif step == "WAITING_FOR_FILE_COUNT":
         if not message.text.isdigit() or int(message.text) <= 0:
             await message.reply_text("⚠️ অনুগ্রহ করে একটি সঠিক সংখ্যা লিখে পাঠান (যেমন: 1, 2, 3):")
@@ -359,7 +350,7 @@ async def admin_message_handler(client, message):
         
         await message.reply_text(f"ঠিক আছে, এখন পর পর **{count} টি** ভিডিও/ফাইল এক এক করে বটকে পাঠান:")
 
-    # Step 4: Receiving Media/Files Batch
+    # Step 4: Video / File Receiving
     elif step == "WAITING_FOR_FILES":
         file_id = None
         file_type = None
@@ -384,14 +375,13 @@ async def admin_message_handler(client, message):
         if len(received) < total:
             await message.reply_text(f"✅ {len(received)}/{total} ফাইল পাওয়া গেছে। বাকিগুলো পাঠান:")
         else:
-            # All files received, save to Database
             cmd_key = state_data.get("temp_cmd_key")
             is_episodic = state_data.get("is_episodic")
 
             if is_episodic:
                 ep_title = state_data.get("temp_ep_title")
                 episodes = commands_data[cmd_key].get("episodes", {})
-                ep_key = f"ep_{len(episodes) + 1}"
+                ep_key = f"e{len(episodes) + 1}"
                 
                 episodes[ep_key] = {
                     "title": ep_title,
@@ -400,7 +390,7 @@ async def admin_message_handler(client, message):
                 commands_data[cmd_key]["episodes"] = episodes
                 
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Add Another Episode", callback_data=f"add_ep_{cmd_key}")],
+                    [InlineKeyboardButton("➕ Add Another Episode", callback_data=f"ae_{cmd_key}")],
                     [InlineKeyboardButton("📋 Manage Content", callback_data=f"admin_manage_{cmd_key}")]
                 ])
                 await message.reply_text(f"🎉 <b>'{ep_title}'</b> সফলভাবে সেভ হয়েছে! ({total}টি ফাইল সহ)", reply_markup=keyboard)
