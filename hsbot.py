@@ -110,19 +110,22 @@ async def send_welcome_menu(message_or_callback):
     else:
         await message_or_callback.message.edit_text(text, reply_markup=reply_markup)
 
+# ক্যাপশন সহ ফাইল পাঠানোর ফাংশন
 async def send_file_list(client, user_id, file_list):
     for item in file_list:
         f_id = item['id']
         f_type = item['type']
+        f_caption = item.get('caption', '')  # ক্যাপশন সাপোর্ট
+        
         try:
             if f_type == "video":
-                await client.send_video(user_id, f_id)
+                await client.send_video(user_id, f_id, caption=f_caption)
             elif f_type == "photo":
-                await client.send_photo(user_id, f_id)
+                await client.send_photo(user_id, f_id, caption=f_caption)
             elif f_type == "document":
-                await client.send_document(user_id, f_id)
+                await client.send_document(user_id, f_id, caption=f_caption)
             elif f_type == "audio":
-                await client.send_audio(user_id, f_id)
+                await client.send_audio(user_id, f_id, caption=f_caption)
         except Exception as e:
             print(f"Error sending file: {e}")
 
@@ -152,7 +155,6 @@ async def callback_handler(client, callback_query):
                 buttons = []
                 episodes = item.get("episodes", {})
                 for ep_key, ep_val in episodes.items():
-                    # Format: ge_cmdKey_epKey
                     buttons.append([InlineKeyboardButton(ep_val['title'], callback_data=f"ge_{cmd_key}_{ep_key}")])
                 
                 buttons.append([InlineKeyboardButton("🔙 Back Main Menu", callback_data="back_user_main")])
@@ -350,10 +352,11 @@ async def admin_message_handler(client, message):
         
         await message.reply_text(f"ঠিক আছে, এখন পর পর **{count} টি** ভিডিও/ফাইল এক এক করে বটকে পাঠান:")
 
-    # Step 4: Video / File Receiving
+    # Step 4: Video / File Receiving (ক্যাপশন সহ সেভ করা)
     elif step == "WAITING_FOR_FILES":
         file_id = None
         file_type = None
+        caption = message.caption or ""  # ক্যাপশন ক্যাপচার করা হচ্ছে
 
         if message.video:
             file_id, file_type = message.video.file_id, "video"
@@ -369,7 +372,7 @@ async def admin_message_handler(client, message):
             return
 
         received = state_data.get("received_files", [])
-        received.append({"id": file_id, "type": file_type})
+        received.append({"id": file_id, "type": file_type, "caption": caption})
         total = state_data.get("total_files")
 
         if len(received) < total:
