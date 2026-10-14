@@ -54,7 +54,6 @@ def save_user_to_firebase(user_id, first_name, username):
     except Exception as e:
         print(f"Firebase Save Error: {e}")
 
-# ফায়ারবেস থেকে সব ইউজারের আইডি ফেচ করার ফাংশন
 def get_all_users_from_firebase():
     try:
         url = f"{DATABASE_URL}/users.json"
@@ -108,12 +107,10 @@ async def start_handler(client, message):
         )
         await message.reply_text(text, reply_markup=keyboard)
     else:
-        await send_welcome_menu(message, show_tutorial_video=False)
+        # দ্বিতীয়বার বা সরাসরি স্টার্ট করলে শুধু মেনু দেখাবে
+        await send_welcome_menu(message)
 
-async def send_welcome_menu(message_or_callback, show_tutorial_video=False):
-    client = message_or_callback._client if hasattr(message_or_callback, "_client") else app
-    user_id = message_or_callback.from_user.id if hasattr(message_or_callback, "from_user") else message_or_callback.message.chat.id
-
+async def send_welcome_menu(message_or_callback):
     buttons = []
     if tutorial_data["id"]:
         buttons.append([InlineKeyboardButton("🎥 Tutorial (কিভাবে মুভি দেখবেন)", callback_data="get_tutorial")])
@@ -124,27 +121,29 @@ async def send_welcome_menu(message_or_callback, show_tutorial_video=False):
     reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
     text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয় কন্টেন্ট নির্বাচন করুন:"
     
-    if show_tutorial_video and tutorial_data["id"]:
-        try:
-            f_id = tutorial_data["id"]
-            f_type = tutorial_data["type"]
-            f_caption = tutorial_data.get("caption", "")
-            
-            if f_type == "video":
-                await client.send_video(user_id, f_id, caption=f_caption)
-            elif f_type == "photo":
-                await client.send_photo(user_id, f_id, caption=f_caption)
-            elif f_type == "document":
-                await client.send_document(user_id, f_id, caption=f_caption)
-            elif f_type == "audio":
-                await client.send_audio(user_id, f_id, caption=f_caption)
-        except Exception as e:
-            print(f"Error sending tutorial media: {e}")
-
     if hasattr(message_or_callback, "reply_text"):
         await message_or_callback.reply_text(text, reply_markup=reply_markup)
     else:
         await message_or_callback.message.edit_text(text, reply_markup=reply_markup)
+
+async def send_tutorial_media(client, user_id):
+    if not tutorial_data["id"]:
+        return
+    try:
+        f_id = tutorial_data["id"]
+        f_type = tutorial_data["type"]
+        f_caption = tutorial_data.get("caption", "")
+        
+        if f_type == "video":
+            await client.send_video(user_id, f_id, caption=f_caption)
+        elif f_type == "photo":
+            await client.send_photo(user_id, f_id, caption=f_caption)
+        elif f_type == "document":
+            await client.send_document(user_id, f_id, caption=f_caption)
+        elif f_type == "audio":
+            await client.send_audio(user_id, f_id, caption=f_caption)
+    except Exception as e:
+        print(f"Error sending tutorial media: {e}")
 
 async def send_file_list(client, user_id, file_list):
     for item in file_list:
@@ -176,7 +175,13 @@ async def callback_handler(client, callback_query):
                 await callback_query.message.delete()
             except:
                 pass
-            await send_welcome_menu(callback_query, show_tutorial_video=True)
+            
+            # ১. প্রথমবার সফল হওয়ার পর আগে টিউটোরিয়াল ভিডিওটি পাঠানো হবে
+            if tutorial_data["id"]:
+                await send_tutorial_media(client, user_id)
+            
+            # ২. ঠিক তার পরেই স্বাগতম মেসেজ ও কন্টেন্টের বাটনগুলো পাঠানো হবে
+            await send_welcome_menu(callback_query)
         else:
             await callback_query.answer("⚠️ আপনি এখনও ২টি চ্যানেলে জয়েন করেননি!", show_alert=True)
             return
@@ -186,21 +191,7 @@ async def callback_handler(client, callback_query):
             await callback_query.answer("টিউটোরিয়াল ফাইল সেট আপ করা হয়নি!", show_alert=True)
             return
         await callback_query.answer("টিউটোরিয়াল পাঠানো হচ্ছে...")
-        try:
-            f_id = tutorial_data["id"]
-            f_type = tutorial_data["type"]
-            f_caption = tutorial_data.get("caption", "")
-            
-            if f_type == "video":
-                await client.send_video(user_id, f_id, caption=f_caption)
-            elif f_type == "photo":
-                await client.send_photo(user_id, f_id, caption=f_caption)
-            elif f_type == "document":
-                await client.send_document(user_id, f_id, caption=f_caption)
-            elif f_type == "audio":
-                await client.send_audio(user_id, f_id, caption=f_caption)
-        except Exception as e:
-            await callback_query.answer("ফাইল পাঠাতে সমস্যা হয়েছে።", show_alert=True)
+        await send_tutorial_media(client, user_id)
 
     elif data.startswith("mc_"):
         if not await check_joined(user_id):
@@ -244,7 +235,7 @@ async def callback_handler(client, callback_query):
         await callback_query.answer("পর্বটি খুঁজে পাওয়া যায়নি!", show_alert=True)
 
     elif data == "back_user_main":
-        await send_welcome_menu(callback_query, show_tutorial_video=False)
+        await send_welcome_menu(callback_query)
 
     # ------------------- ADMIN CALLBACKS -------------------
     elif user_id == ADMIN_ID:
@@ -273,7 +264,7 @@ async def callback_handler(client, callback_query):
 
         elif data == "admin_broadcast":
             admin_state[ADMIN_ID] = {"step": "WAITING_FOR_BROADCAST_MESSAGE"}
-            await callback_query.message.edit_text("📢 আপনি সকল ইউজারের কাছে যে মেসেজ বা মিডিয়া পাঠাতে চান তা এখানে পাঠান (টেক্সট, ভিডিও, ছবি ইত্যাদি):")
+            await callback_query.message.edit_text("📢 আপনি সকল ইউজারের কাছে যে মেসেজ বা মিডিয়া পাঠাতে চান তা এখানে পাঠান:")
             await callback_query.answer()
 
         elif data == "admin_manage_cmds":
