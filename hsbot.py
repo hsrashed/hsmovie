@@ -40,6 +40,7 @@ app = Client(
 
 admin_state = {}
 commands_data = {}
+tutorial_data = {"id": None, "type": "video", "caption": "বট ব্যবহারের নির্দেশিকা (Tutorial)"}
 
 def save_user_to_firebase(user_id, first_name, username):
     try:
@@ -95,27 +96,51 @@ async def start_handler(client, message):
         )
         await message.reply_text(text, reply_markup=keyboard)
     else:
-        await send_welcome_menu(message)
+        await send_welcome_menu(message, show_tutorial_video=False)
 
-async def send_welcome_menu(message_or_callback):
+async def send_welcome_menu(message_or_callback, show_tutorial_video=False):
+    client = message_or_callback._client if hasattr(message_or_callback, "_client") else app
+    user_id = message_or_callback.from_user.id if hasattr(message_or_callback, "from_user") else message_or_callback.message.chat.id
+
     buttons = []
+    # টিউটোরিয়াল বাটনটি সবসময় সবার উপরে থাকবে
+    if tutorial_data["id"]:
+        buttons.append([InlineKeyboardButton("🎥 Tutorial (কিভাবে মুভি দেখবেন)", callback_data="get_tutorial")])
+
     for key, data in commands_data.items():
         buttons.append([InlineKeyboardButton(data['title'], callback_data=f"mc_{key}")])
     
     reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
     text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয় কন্টেন্ট নির্বাচন করুন:"
     
+    # প্রথমবার জয়েন সফল হলে স্বয়ংক্রিয়ভাবে টিউটোরিয়াল পাঠানো
+    if show_tutorial_video and tutorial_data["id"]:
+        try:
+            f_id = tutorial_data["id"]
+            f_type = tutorial_data["type"]
+            f_caption = tutorial_data.get("caption", "")
+            
+            if f_type == "video":
+                await client.send_video(user_id, f_id, caption=f_caption)
+            elif f_type == "photo":
+                await client.send_photo(user_id, f_id, caption=f_caption)
+            elif f_type == "document":
+                await client.send_document(user_id, f_id, caption=f_caption)
+            elif f_type == "audio":
+                await client.send_audio(user_id, f_id, caption=f_caption)
+        except Exception as e:
+            print(f"Error sending tutorial media: {e}")
+
     if hasattr(message_or_callback, "reply_text"):
         await message_or_callback.reply_text(text, reply_markup=reply_markup)
     else:
         await message_or_callback.message.edit_text(text, reply_markup=reply_markup)
 
-# ক্যাপশন সহ ফাইল পাঠানোর ফাংশন
 async def send_file_list(client, user_id, file_list):
     for item in file_list:
         f_id = item['id']
         f_type = item['type']
-        f_caption = item.get('caption', '')  # ক্যাপশন সাপোর্ট
+        f_caption = item.get('caption', '')
         
         try:
             if f_type == "video":
@@ -136,13 +161,37 @@ async def callback_handler(client, callback_query):
     
     if data == "check_join":
         if await check_joined(user_id):
-            await callback_query.answer("ধন্যবাদ! আপনি সফলভাবে জয়েন করেছেন।", show_alert=True)
-            await send_welcome_menu(callback_query)
+            await callback_query.answer("ধন্যবাদ! ভেরিফিকেশন সফল হয়েছে।", show_alert=True)
+            try:
+                await callback_query.message.delete()
+            except:
+                pass
+            await send_welcome_menu(callback_query, show_tutorial_video=True)
         else:
             await callback_query.answer("⚠️ আপনি এখনও ২টি চ্যানেলে জয়েন করেননি!", show_alert=True)
             return
 
-    # User Selection: Main Title Clicked
+    elif data == "get_tutorial":
+        if not tutorial_data["id"]:
+            await callback_query.answer("টিউটোরিয়াল ফাইল সেট আপ করা হয়নি!", show_alert=True)
+            return
+        await callback_query.answer("টিউটোরিয়াল পাঠানো হচ্ছে...")
+        try:
+            f_id = tutorial_data["id"]
+            f_type = tutorial_data["type"]
+            f_caption = tutorial_data.get("caption", "")
+            
+            if f_type == "video":
+                await client.send_video(user_id, f_id, caption=f_caption)
+            elif f_type == "photo":
+                await client.send_photo(user_id, f_id, caption=f_caption)
+            elif f_type == "document":
+                await client.send_document(user_id, f_id, caption=f_caption)
+            elif f_type == "audio":
+                await client.send_audio(user_id, f_id, caption=f_caption)
+        except Exception as e:
+            await callback_query.answer("ফাইল পাঠাতে সমস্যা হয়েছে।", show_alert=True)
+
     elif data.startswith("mc_"):
         if not await check_joined(user_id):
             await callback_query.answer("⚠️ ফাইল পেতে চ্যানেলে জয়েন করুন!", show_alert=True)
@@ -168,7 +217,6 @@ async def callback_handler(client, callback_query):
         else:
             await callback_query.answer("কন্টেন্ট খুঁজে পাওয়া যায়নি!", show_alert=True)
 
-    # User Selection: Episode Clicked
     elif data.startswith("ge_"):
         if not await check_joined(user_id):
             await callback_query.answer("⚠️ ফাইল পেতে চ্যানেলে জয়েন করুন!", show_alert=True)
@@ -186,7 +234,7 @@ async def callback_handler(client, callback_query):
         await callback_query.answer("পর্বটি খুঁজে পাওয়া যায়নি!", show_alert=True)
 
     elif data == "back_user_main":
-        await send_welcome_menu(callback_query)
+        await send_welcome_menu(callback_query, show_tutorial_video=False)
 
     # ------------------- ADMIN CALLBACKS -------------------
     elif user_id == ADMIN_ID:
@@ -206,6 +254,11 @@ async def callback_handler(client, callback_query):
             }
             txt = "সিরিজ/নাটকের প্রধান **টাইটেল** লিখে পাঠান:" if is_episodic else "মুভি/কন্টেন্টের **টাইটেল** লিখে পাঠান:"
             await callback_query.message.edit_text(txt)
+            await callback_query.answer()
+
+        elif data == "admin_set_tutorial":
+            admin_state[ADMIN_ID] = {"step": "WAITING_FOR_TUTORIAL_FILE"}
+            await callback_query.message.edit_text("🎥 নতুন **টিউটোরিয়াল ফাইল বা মিডিয়া** (ভিডিও, ডকুমেন্ট ইত্যাদি) সরাসরি এখানে পাঠান:")
             await callback_query.answer()
 
         elif data == "admin_manage_cmds":
@@ -268,6 +321,7 @@ async def callback_handler(client, callback_query):
 async def send_admin_home(event):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Movie / Series", callback_data="admin_add_content")],
+        [InlineKeyboardButton("🎥 Set / Change Tutorial", callback_data="admin_set_tutorial")],
         [InlineKeyboardButton("📋 Manage Content & Episodes", callback_data="admin_manage_cmds")]
     ])
     text = "স্বাগতম এডমিন প্যানেলে! আপনার করণীয় অপশন বেছে নিন:"
@@ -296,6 +350,33 @@ async def admin_panel(client, message):
 async def admin_message_handler(client, message):
     state_data = admin_state.get(ADMIN_ID, {})
     step = state_data.get("step")
+
+    # Tutorial File Setup Step
+    if step == "WAITING_FOR_TUTORIAL_FILE":
+        file_id = None
+        file_type = None
+        caption = message.caption or "বট ব্যবহারের নির্দেশিকা"
+
+        if message.video:
+            file_id, file_type = message.video.file_id, "video"
+        elif message.photo:
+            file_id, file_type = message.photo.file_id, "photo"
+        elif message.document:
+            file_id, file_type = message.document.file_id, "document"
+        elif message.audio:
+            file_id, file_type = message.audio.file_id, "audio"
+
+        if file_id:
+            tutorial_data["id"] = file_id
+            tutorial_data["type"] = file_type
+            tutorial_data["caption"] = caption
+            admin_state[ADMIN_ID] = {}
+            
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Admin Panel", callback_data="admin_menu_home")]])
+            await message.reply_text("✅ নতুন টিউটোরিয়াল ফাইল সফলভাবে সেট হয়ে গেছে!", reply_markup=keyboard)
+        else:
+            await message.reply_text("⚠️ দয়া করে একটি সঠিক ভিডিও, ছবি বা ফাইল পাঠান:")
+        return
 
     # Step 1: Main Title Input
     if step == "WAITING_FOR_MAIN_TITLE":
@@ -352,11 +433,11 @@ async def admin_message_handler(client, message):
         
         await message.reply_text(f"ঠিক আছে, এখন পর পর **{count} টি** ভিডিও/ফাইল এক এক করে বটকে পাঠান:")
 
-    # Step 4: Video / File Receiving (ক্যাপশন সহ সেভ করা)
+    # Step 4: Video / File Receiving
     elif step == "WAITING_FOR_FILES":
         file_id = None
         file_type = None
-        caption = message.caption or ""  # ক্যাপশন ক্যাপচার করা হচ্ছে
+        caption = message.caption or ""
 
         if message.video:
             file_id, file_type = message.video.file_id, "video"
