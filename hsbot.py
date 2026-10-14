@@ -54,6 +54,18 @@ def save_user_to_firebase(user_id, first_name, username):
     except Exception as e:
         print(f"Firebase Save Error: {e}")
 
+# ফায়ারবেস থেকে সব ইউজারের আইডি ফেচ করার ফাংশন
+def get_all_users_from_firebase():
+    try:
+        url = f"{DATABASE_URL}/users.json"
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200 and res.json():
+            users_dict = res.json()
+            return [str(user_data['user_id']) for user_data in users_dict.values() if 'user_id' in user_data]
+    except Exception as e:
+        print(f"Firebase Get Users Error: {e}")
+    return []
+
 def is_user_member_of_channel(channel_username, user_id):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
@@ -103,7 +115,6 @@ async def send_welcome_menu(message_or_callback, show_tutorial_video=False):
     user_id = message_or_callback.from_user.id if hasattr(message_or_callback, "from_user") else message_or_callback.message.chat.id
 
     buttons = []
-    # টিউটোরিয়াল বাটনটি সবসময় সবার উপরে থাকবে
     if tutorial_data["id"]:
         buttons.append([InlineKeyboardButton("🎥 Tutorial (কিভাবে মুভি দেখবেন)", callback_data="get_tutorial")])
 
@@ -113,7 +124,6 @@ async def send_welcome_menu(message_or_callback, show_tutorial_video=False):
     reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
     text = "🎉 <b>স্বাগতম!</b>\n\nনিচে প্রদত্ত বাটনগুলো থেকে আপনার প্রয়োজনীয় কন্টেন্ট নির্বাচন করুন:"
     
-    # প্রথমবার জয়েন সফল হলে স্বয়ংক্রিয়ভাবে টিউটোরিয়াল পাঠানো
     if show_tutorial_video and tutorial_data["id"]:
         try:
             f_id = tutorial_data["id"]
@@ -190,7 +200,7 @@ async def callback_handler(client, callback_query):
             elif f_type == "audio":
                 await client.send_audio(user_id, f_id, caption=f_caption)
         except Exception as e:
-            await callback_query.answer("ফাইল পাঠাতে সমস্যা হয়েছে।", show_alert=True)
+            await callback_query.answer("ফাইল পাঠাতে সমস্যা হয়েছে።", show_alert=True)
 
     elif data.startswith("mc_"):
         if not await check_joined(user_id):
@@ -258,7 +268,12 @@ async def callback_handler(client, callback_query):
 
         elif data == "admin_set_tutorial":
             admin_state[ADMIN_ID] = {"step": "WAITING_FOR_TUTORIAL_FILE"}
-            await callback_query.message.edit_text("🎥 নতুন **টিউটোরিয়াল ফাইল বা মিডিয়া** (ভিডিও, ডকুমেন্ট ইত্যাদি) সরাসরি এখানে পাঠান:")
+            await callback_query.message.edit_text("🎥 নতুন **টিউটোরিয়াল ফাইল বা মিডিয়া** সরাসরি এখানে পাঠান:")
+            await callback_query.answer()
+
+        elif data == "admin_broadcast":
+            admin_state[ADMIN_ID] = {"step": "WAITING_FOR_BROADCAST_MESSAGE"}
+            await callback_query.message.edit_text("📢 আপনি সকল ইউজারের কাছে যে মেসেজ বা মিডিয়া পাঠাতে চান তা এখানে পাঠান (টেক্সট, ভিডিও, ছবি ইত্যাদি):")
             await callback_query.answer()
 
         elif data == "admin_manage_cmds":
@@ -322,6 +337,7 @@ async def send_admin_home(event):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Movie / Series", callback_data="admin_add_content")],
         [InlineKeyboardButton("🎥 Set / Change Tutorial", callback_data="admin_set_tutorial")],
+        [InlineKeyboardButton("📢 Send Broadcast", callback_data="admin_broadcast")],
         [InlineKeyboardButton("📋 Manage Content & Episodes", callback_data="admin_manage_cmds")]
     ])
     text = "স্বাগতম এডমিন প্যানেলে! আপনার করণীয় অপশন বেছে নিন:"
@@ -350,6 +366,37 @@ async def admin_panel(client, message):
 async def admin_message_handler(client, message):
     state_data = admin_state.get(ADMIN_ID, {})
     step = state_data.get("step")
+
+    # Broadcast Step
+    if step == "WAITING_FOR_BROADCAST_MESSAGE":
+        admin_state[ADMIN_ID] = {}
+        users = get_all_users_from_firebase()
+        
+        if not users:
+            await message.reply_text("⚠️ ডাটাবেসে কোনো ইউজারের আইডি পাওয়া যায়নি!")
+            return
+
+        status_msg = await message.reply_text(f"⏳ ব্রডকাস্ট শুরু হয়েছে... মোট ইউজার: {len(users)} জন। অপেক্ষা করুন...")
+        
+        success_count = 0
+        fail_count = 0
+
+        for uid in users:
+            try:
+                await message.copy(chat_id=int(uid))
+                success_count += 1
+            except Exception as e:
+                print(f"Failed to send to {uid}: {e}")
+                fail_count += 1
+
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Admin Panel", callback_data="admin_menu_home")]])
+        await status_msg.edit_text(
+            f"📢 **ব্রডকাস্ট সম্পন্ন হয়েছে!**\n\n"
+            f"✅ সফলভাবে পাঠানো হয়েছে: {success_count} জন\n"
+            f"❌ ব্যর্থ হয়েছে (বট ব্লক করেছে): {fail_count} জন",
+            reply_markup=keyboard
+        )
+        return
 
     # Tutorial File Setup Step
     if step == "WAITING_FOR_TUTORIAL_FILE":
